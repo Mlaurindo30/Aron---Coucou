@@ -19,6 +19,12 @@
 // Claude Code expects lives in exactly one place.
 
 use std::collections::HashMap;
+#[cfg(windows)]
+use std::ffi::OsStr;
+#[cfg(windows)]
+use std::io;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -29,6 +35,16 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::sync::mpsc;
+#[cfg(windows)]
+use windows::core::BOOL;
+#[cfg(windows)]
+use windows::Win32::Foundation::{LocalFree, HLOCAL};
+#[cfg(windows)]
+use windows::Win32::Security::Authorization::{
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+};
+#[cfg(windows)]
+use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 
 use crate::island::WINDOW_LABEL;
 use crate::log;
@@ -67,12 +83,63 @@ pub fn pipe_name() -> String {
 }
 
 #[cfg(windows)]
+fn pipe_security_descriptor(user_sid: &str) -> String {
+    format!("D:P(A;;GA;;;SY)(A;;GA;;;{user_sid})")
+}
+
+#[cfg(windows)]
+fn create_pipe_instance(name: &str, first_instance: bool) -> io::Result<NamedPipeServer> {
+    let user_sid = crate::platform::current_user_sid().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            "cannot determine the current user SID for the relay pipe",
+        )
+    })?;
+    let descriptor_sddl = pipe_security_descriptor(&user_sid);
+    let descriptor_sddl = OsStr::new(&descriptor_sddl)
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let mut descriptor = PSECURITY_DESCRIPTOR(std::ptr::null_mut());
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            windows::core::PCWSTR(descriptor_sddl.as_ptr()),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            None,
+        )
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    }
+
+    let mut attributes = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor.0,
+        bInheritHandle: BOOL(0),
+    };
+    let mut options = ServerOptions::new();
+    options
+        .first_pipe_instance(first_instance)
+        .reject_remote_clients(true);
+    let server = unsafe {
+        options.create_with_security_attributes_raw(
+            name,
+            (&mut attributes as *mut SECURITY_ATTRIBUTES).cast(),
+        )
+    };
+    unsafe {
+        let _ = LocalFree(Some(HLOCAL(descriptor.0)));
+    }
+    server
+}
+
+#[cfg(windows)]
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let name = pipe_name();
-        // first_pipe_instance also means we refuse to join a pipe somebody else
-        // already owns under our name, rather than serving on top of it.
-        let mut server = match ServerOptions::new().first_pipe_instance(true).create(&name) {
+        // The protected DACL admits this user and SYSTEM only. Same-user
+        // processes are trusted; remote clients and other accounts are not.
+        // first_pipe_instance refuses to serve over an existing pipe.
+        let mut server = match create_pipe_instance(&name, true) {
             Ok(s) => s,
             Err(err) => {
                 log::line(format!("cannot open the relay pipe: {err}"));
@@ -85,7 +152,7 @@ pub fn start(app: AppHandle) {
                 continue;
             }
             // Hand the connected instance to a task and listen on a fresh one.
-            let next = match ServerOptions::new().create(&name) {
+            let next = match create_pipe_instance(&name, false) {
                 Ok(s) => s,
                 Err(err) => {
                     log::line(format!("cannot reopen the relay pipe: {err}"));
@@ -294,4 +361,34 @@ pub fn answer(app: &AppHandle, request_id: &str, decision: &str) {
     };
     log::line(format!("decision id={request_id} {word}"));
     send(app, request_id, Reply::Decision(word.to_string()), false);
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[test]
+    fn pipe_security_descriptor_sddl_contains_only_system_and_current_user() {
+        let sid = "S-1-5-21-111-222-333-1001";
+        let sddl = pipe_security_descriptor(sid);
+
+        assert_eq!(sddl, format!("D:P(A;;GA;;;SY)(A;;GA;;;{sid})"));
+        let sddl_wide = OsStr::new(&sddl)
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<_>>();
+        let mut descriptor = PSECURITY_DESCRIPTOR(std::ptr::null_mut());
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                windows::core::PCWSTR(sddl_wide.as_ptr()),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                None,
+            )
+            .expect("relay pipe SDDL is valid");
+            assert!(!descriptor.0.is_null());
+            let _ = LocalFree(Some(HLOCAL(descriptor.0)));
+        }
+    }
 }
