@@ -4,8 +4,22 @@
 
 import "./settings.css";
 import { Bridge, onEvent, type HookStatus } from "../core/bridge";
+import {
+  ARON_SETTINGS_GROUPS,
+  aronSettingsFieldsByGroup,
+  isSecretWritableSource,
+  safeSecretMetadata,
+  type AronProvider,
+  type AronSecretStatus,
+  type AronSettingsKey,
+  type AronSettingsPrefs,
+  type AronSettingsSchemaField,
+  type AronSettingsSnapshot,
+  type HermesProfileRole,
+} from "../core/aron-settings";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
 import { h, clear } from "../views/dom";
+import { cameraOptions, cameraState } from "./aron-camera.js";
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
 let version = "";
@@ -23,6 +37,7 @@ function toggle(on: boolean, onChange: (v: boolean) => void): HTMLElement {
   el.addEventListener("click", () => {
     const next = !el.classList.contains("on");
     el.classList.toggle("on", next);
+    el.setAttribute("aria-pressed", String(next));
     onChange(next);
   });
   return el;
@@ -417,6 +432,441 @@ function generalSection(): HTMLElement {
   );
 }
 
+// ── ARON settings — separate store, loaded and updated only through Tauri ─────
+
+type AronPreferenceValue = AronSettingsPrefs[keyof AronSettingsPrefs];
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function credentialErrorMessage(error: unknown, value: string): string {
+  const message = errorMessage(error);
+  return value ? message.replaceAll(value, "[redacted]") : message;
+}
+
+function showNotice(target: HTMLElement, kind: "ok" | "err" | "warn", text: string) {
+  clear(target);
+  target.append(h("div", { class: `notice ${kind}`, text }));
+}
+
+function aronSettingsSection(initial: AronSettingsSnapshot | null, loadError?: unknown): HTMLElement {
+  const section = h("section", { class: "aron-settings" });
+  section.append(
+    h("h2", {}, h("span", { text: "A.R.O.N. settings" })),
+    h("div", {
+      class: "hint",
+      text: "These preferences and credentials are stored by ARON, separately from Coucou settings.",
+    }),
+  );
+
+  if (!initial) {
+    const feedback = h("div", {});
+    showNotice(feedback, "err", `Could not load ARON settings: ${errorMessage(loadError)}`);
+    const retry = h("button", { class: "primary", text: "Retry loading" });
+    retry.addEventListener("click", async () => {
+      retry.disabled = true;
+      try {
+        section.replaceWith(aronSettingsSection(await Bridge.loadAronSettings()));
+      } catch (error) {
+        showNotice(feedback, "err", `Could not load ARON settings: ${errorMessage(error)}`);
+        retry.disabled = false;
+      }
+    });
+    section.append(feedback, h("div", { class: "row" }, retry));
+    return section;
+  }
+
+  let snapshot = initial;
+  let draft: AronSettingsPrefs = structuredClone(initial.prefs);
+  let patch: Partial<AronSettingsPrefs> = {};
+  let discoveredCameras: MediaDeviceInfo[] = [];
+  let cameraMessage = "Camera access is requested only when you choose Detect cameras.";
+  let cameraMessageKind: "hint" | "ok" | "warn" | "err" = "hint";
+
+  const feedback = h("div", {});
+  const saveButton = h("button", { class: "primary", text: "Save ARON settings" });
+  const providers = h("div", { class: "aron-providers" });
+  const fieldsHost = h("div", { class: "aron-groups" });
+  saveButton.disabled = true;
+
+  function updatePreference(key: AronSettingsKey, value: AronPreferenceValue) {
+    draft = { ...draft, [key]: value } as AronSettingsPrefs;
+    const nextPatch = { ...patch };
+    if (JSON.stringify(value) === JSON.stringify(snapshot.prefs[key])) {
+      delete nextPatch[key];
+    } else {
+      Object.assign(nextPatch, { [key]: value });
+    }
+    patch = nextPatch;
+    saveButton.disabled = Object.keys(patch).length === 0;
+    clear(feedback);
+  }
+
+  function renderSecretControl(provider: AronProvider): HTMLElement {
+    const source = provider === "jev" ? "Jev" : "Gemini";
+    const input = h("input", {
+      type: "password",
+      placeholder: provider === "jev" ? "Jev API key" : "Gemini API key",
+      autocomplete: "new-password",
+      spellcheck: "false",
+      "aria-label": `${source} API key`,
+    }) as HTMLInputElement;
+    const labelInput = provider === "gemini"
+      ? h("input", {
+        type: "text",
+        placeholder: "Label for this key",
+        autocomplete: "off",
+        "aria-label": "Gemini key label",
+      }) as HTMLInputElement
+      : null;
+    const state = h("div", { class: "aron-secret-state" });
+    const feedback = h("div", {});
+    const card = h("div", { class: "aron-provider" });
+    const save = h("button", { class: "primary", text: provider === "jev" ? "Save Jev key" : "Add Gemini key" });
+
+    function renderStatus(rawStatus: AronSecretStatus) {
+      const status = safeSecretMetadata(rawStatus);
+      clear(state);
+      state.append(h("div", {
+        class: "hint",
+        text: `${source} · ${status.configured ? "Configured" : "Not configured"}`,
+      }));
+      for (const entry of status.entries) {
+        const row = h("div", { class: "aron-secret-entry" },
+          h("span", { text: `${entry.source} · ${entry.label} · ending in ${entry.last4}` }),
+        );
+        if (isSecretWritableSource(entry.source)) {
+          const remove = h("button", { class: "danger", text: "Remove" });
+          remove.addEventListener("click", async () => {
+            remove.disabled = true;
+            clear(feedback);
+            try {
+              renderStatus(await Bridge.aronSecretRemove(provider, entry.id));
+              showNotice(feedback, "ok", `${source} credential removed.`);
+            } catch (error) {
+              remove.disabled = false;
+              showNotice(feedback, "err", `Could not remove ${source} credential: ${errorMessage(error)}`);
+            }
+          });
+          row.append(remove);
+        }
+        state.append(row);
+      }
+    }
+
+    save.addEventListener("click", async () => {
+      const value = input.value;
+      const label = provider === "jev" ? "Jev" : labelInput?.value.trim() ?? "";
+      if (!value.trim()) {
+        showNotice(feedback, "err", `Enter a ${source} API key before saving.`);
+        return;
+      }
+      if (!label) {
+        showNotice(feedback, "err", "Enter a label for this Gemini key.");
+        return;
+      }
+      save.disabled = true;
+      clear(feedback);
+      try {
+        renderStatus(await Bridge.aronSecretAdd(provider, value, label));
+        input.value = "";
+        if (labelInput) labelInput.value = "";
+        showNotice(feedback, "ok", `${source} credential saved in ARON's credential store.`);
+      } catch (error) {
+        showNotice(feedback, "err", `Could not save ${source} credential: ${credentialErrorMessage(error, value)}`);
+      } finally {
+        save.disabled = false;
+      }
+    });
+
+    const controls = h("div", { class: "row aron-secret-inputs" }, input);
+    if (labelInput) controls.append(labelInput);
+    controls.append(save);
+    card.append(
+      h("h3", { text: source }),
+      state,
+      controls,
+      feedback,
+    );
+    const current = snapshot.secrets.find((status) => status.provider === provider);
+    if (current) renderStatus(current);
+    else state.append(h("div", { class: "hint", text: `${source} status is unavailable.` }));
+    return card;
+  }
+
+  providers.append(renderSecretControl("jev"), renderSecretControl("gemini"));
+
+  function conflictNotice(message: string, button: HTMLButtonElement) {
+    showNotice(feedback, "err", message);
+    const reload = h("button", { text: "Reload current settings" });
+    reload.addEventListener("click", async () => {
+      reload.disabled = true;
+      try {
+        section.replaceWith(aronSettingsSection(await Bridge.loadAronSettings()));
+      } catch (error) {
+        reload.disabled = false;
+        feedback.append(h("div", {
+          class: "notice err",
+          text: `Could not reload ARON settings: ${errorMessage(error)}`,
+        }));
+      }
+    });
+    feedback.append(h("div", { class: "row" }, reload));
+    button.disabled = false;
+  }
+
+  function renderAronField(
+    key: AronSettingsKey,
+    field: AronSettingsSchemaField,
+    value: AronPreferenceValue,
+  ): HTMLElement {
+    const label = h("label", { text: field.title, for: `aron-${key}` });
+    const description = h("div", { class: "hint aron-field-description", text: field.description });
+    const types = Array.isArray(field.type) ? field.type : [field.type];
+    const isReadOnly = !field["x-editable"];
+
+    if (isReadOnly) {
+      const text = value == null ? "Not calibrated" : `${Math.round(Number(value) * 100)}%`;
+      return h("div", { class: "aron-field" },
+        h("div", { class: "row aron-field-row" }, label, h("span", { class: "aron-readonly", text })),
+        description,
+      );
+    }
+
+    if (field["x-control"] === "hermes-profiles") {
+      const profiles = value as AronSettingsPrefs["hermes_profiles"];
+      const controls = h("div", { class: "aron-role-fields" });
+      for (const [role, definition] of Object.entries(field.properties ?? {})) {
+        const roleKey = role as HermesProfileRole;
+        const roleInput = h("input", {
+          id: `aron-${key}-${role}`,
+          type: "text",
+          maxlength: String(definition.maxLength ?? 128),
+          placeholder: "Optional profile ID",
+          autocomplete: "off",
+          value: profiles[roleKey] ?? "",
+        }) as HTMLInputElement;
+        roleInput.addEventListener("change", () => {
+          const nextProfiles = { ...profiles };
+          const profile = roleInput.value.trim();
+          if (profile) nextProfiles[roleKey] = profile;
+          else delete nextProfiles[roleKey];
+          updatePreference(key, nextProfiles);
+        });
+        controls.append(h("div", { class: "aron-role-field" },
+          h("label", { for: `aron-${key}-${role}`, text: definition.title }),
+          roleInput,
+        ));
+      }
+      return h("div", { class: "aron-field" },
+        h("div", { class: "row aron-field-row" }, label, controls),
+        description,
+      );
+    }
+
+    if (key === "camera_device") {
+      const options = cameraOptions(discoveredCameras, {
+        camera_device: draft.camera_device,
+        camera_label: draft.camera_label,
+      });
+      const active = options.find((option) => option.active);
+      if (!active && draft.camera_device) {
+        options.unshift({
+          deviceId: draft.camera_device,
+          label: draft.camera_label || "Previously selected camera (not detected)",
+          active: true,
+        });
+      }
+      const select = h("select", { id: `aron-${key}`, "aria-label": field.title });
+      select.append(h("option", { value: "", text: "Automatic camera selection" }));
+      for (const option of options) {
+        select.append(h("option", {
+          value: option.deviceId,
+          text: option.label,
+        }));
+      }
+      select.value = options.find((option) => option.active)?.deviceId ?? "";
+      select.addEventListener("change", () => {
+        const selected = options.find((option) => option.deviceId === select.value);
+        updatePreference("camera_device", select.value);
+        updatePreference("camera_label", selected?.label ?? "");
+      });
+      const detect = h("button", { text: "Detect cameras" });
+      detect.addEventListener("click", async () => {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          cameraMessage = "Could not detect cameras: camera access is unavailable in this window.";
+          cameraMessageKind = "err";
+          drawFields();
+          return;
+        }
+        discoveredCameras = [];
+        detect.disabled = true;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          let stopFailed = false;
+          let stopFailure: unknown = null;
+          for (const track of stream.getTracks()) {
+            try {
+              track.stop();
+            } catch (error) {
+              stopFailed = true;
+              stopFailure ??= error;
+            }
+          }
+          if (stopFailed) throw stopFailure;
+          discoveredCameras = await navigator.mediaDevices.enumerateDevices();
+          const result = cameraState(discoveredCameras, false);
+          cameraMessage = result.message;
+          cameraMessageKind = result.state === "empty" ? "warn" : "ok";
+        } catch (error) {
+          const name =
+            typeof error === "object" && error !== null && "name" in error
+              ? String(error.name)
+              : "";
+          const result = cameraState([], name === "NotAllowedError" || name === "SecurityError");
+          if (result.state === "denied" || name === "NotFoundError") {
+            cameraMessage = result.message;
+            cameraMessageKind = result.state === "denied" ? "err" : "warn";
+          } else {
+            cameraMessage = `Could not detect cameras: ${errorMessage(error)}`;
+            cameraMessageKind = "err";
+          }
+        } finally {
+          drawFields();
+        }
+      });
+      return h("div", { class: "aron-field" },
+        h("div", { class: "row aron-field-row" }, label,
+          h("div", { class: "aron-camera-controls" }, select, detect),
+        ),
+        h("div", { class: `notice ${cameraMessageKind}`, text: cameraMessage }),
+        description,
+      );
+    }
+
+    if (field.enum) {
+      const select = h("select", { id: `aron-${key}` });
+      for (const choice of field.enum) {
+        select.append(h("option", { value: choice, text: choice }));
+      }
+      if (!field.enum.includes(String(value))) {
+        select.append(h("option", { value: String(value), text: `${String(value)} (saved)` }));
+      }
+      select.value = String(value);
+      select.addEventListener("change", () => updatePreference(key, select.value));
+      return h("div", { class: "aron-field" },
+        h("div", { class: "row aron-field-row" }, label, select),
+        description,
+      );
+    }
+
+    if (types.includes("boolean")) {
+      return h("div", { class: "aron-field" },
+        h("div", { class: "row aron-field-row" }, label,
+          toggle(Boolean(value), (next) => updatePreference(key, next)),
+        ),
+        description,
+      );
+    }
+
+    if (types.includes("array")) {
+      const textarea = h("textarea", {
+        id: `aron-${key}`,
+        rows: "3",
+        placeholder: "One item per line",
+      }) as HTMLTextAreaElement;
+      textarea.value = (value as string[]).join("\n");
+      textarea.addEventListener("change", () => updatePreference(
+        key,
+        textarea.value.split(/\r?\n/).filter((line) => line.length > 0),
+      ));
+      return h("div", { class: "aron-field" },
+        h("div", { class: "row aron-field-row" }, label, textarea),
+        description,
+      );
+    }
+
+    if (types.includes("integer") || types.includes("number")) {
+      const input = h("input", {
+        id: `aron-${key}`,
+        type: "number",
+        min: field.minimum,
+        max: field.maximum,
+        step: types.includes("integer") ? "1" : "any",
+      }) as HTMLInputElement;
+      input.value = String(value);
+      input.addEventListener("change", () => {
+        if (!input.reportValidity()) return;
+        const number = input.valueAsNumber;
+        if (Number.isFinite(number)) updatePreference(key, number);
+      });
+      return h("div", { class: "aron-field" },
+        h("div", { class: "row aron-field-row" }, label, input),
+        description,
+      );
+    }
+
+    const input = h("input", {
+      id: `aron-${key}`,
+      type: "text",
+      maxlength: field.maxLength,
+      autocomplete: "off",
+    }) as HTMLInputElement;
+    input.value = String(value);
+    input.addEventListener("change", () => updatePreference(key, input.value));
+    return h("div", { class: "aron-field" },
+      h("div", { class: "row aron-field-row" }, label, input),
+      description,
+    );
+  }
+
+  function drawFields() {
+    clear(fieldsHost);
+    const grouped = aronSettingsFieldsByGroup();
+    for (const group of ARON_SETTINGS_GROUPS) {
+      const body = h("div", { class: "aron-group-fields" });
+      for (const [key, field] of grouped[group]) {
+        body.append(renderAronField(key, field, draft[key]));
+      }
+      if (group === "Providers") body.append(providers);
+      fieldsHost.append(h("section", { class: "aron-group" },
+        h("h3", { text: group }),
+        body,
+      ));
+    }
+  }
+
+  saveButton.addEventListener("click", async () => {
+    if (Object.keys(patch).length === 0) return;
+    saveButton.disabled = true;
+    clear(feedback);
+    try {
+      snapshot = await Bridge.updateAronSettings({ prefs: patch, revision: snapshot.revision });
+      draft = structuredClone(snapshot.prefs);
+      patch = {};
+      showNotice(feedback, "ok", "ARON settings saved.");
+      drawFields();
+    } catch (error) {
+      const message = errorMessage(error);
+      if (/changed since they were loaded|revision|conflict/i.test(message)) {
+        conflictNotice(`ARON settings changed elsewhere. ${message}`, saveButton);
+      } else {
+        showNotice(feedback, "err", `Could not save ARON settings: ${message}`);
+        saveButton.disabled = false;
+      }
+    }
+  });
+
+  drawFields();
+  section.append(
+    h("div", { class: "aron-save-row" }, saveButton),
+    feedback,
+    fieldsHost,
+  );
+  return section;
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -438,9 +888,18 @@ async function main() {
   const present: Record<string, boolean> = {};
   for (const k of keys) present[k] = (await Bridge.secretPresent(k)) ?? false;
 
+  let aronSnapshot: AronSettingsSnapshot | null = null;
+  let aronLoadError: unknown;
+  try {
+    aronSnapshot = await Bridge.loadAronSettings();
+  } catch (error) {
+    aronLoadError = error;
+  }
+
   clear(root);
   root.append(
     h("h1", {}, h("span", { text: "Coucou" }), h("span", { class: "version", text: version })),
+    aronSettingsSection(aronSnapshot, aronLoadError),
     claudeSection(status),
     apiSection(hasKey),
     integrationsSection(present),

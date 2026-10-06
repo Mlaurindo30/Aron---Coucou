@@ -1,5 +1,6 @@
 // Coucou for Windows — app wiring and the commands the island calls.
 
+mod aron_settings;
 mod claude;
 mod files;
 mod hooks;
@@ -377,6 +378,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             boot,
             save_settings,
+            aron_settings::load_aron_settings,
+            aron_settings::update_aron_settings,
+            aron_settings::aron_secret_add,
+            aron_settings::aron_secret_remove,
+            aron_settings::aron_secret_status,
             set_collapsed,
             set_island_rect,
             focus_window,

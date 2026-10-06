@@ -221,6 +221,149 @@ select option {
   color: var(--ink);
 }
 
+textarea {
+  font: 400 12.5px/1.45 var(--font);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  color: var(--ink);
+  padding: 7px 9px;
+  resize: vertical;
+  min-width: min(100%, 320px);
+}
+
+textarea:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.aron-settings {
+  gap: 14px;
+}
+
+.aron-save-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.aron-groups,
+.aron-group-fields,
+.aron-providers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+section.aron-group {
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 10px;
+  gap: 12px;
+  padding: 12px;
+}
+
+.aron-group > h3,
+.aron-provider > h3 {
+  font: 600 12px var(--font);
+}
+
+.aron-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.aron-field-row {
+  align-items: center;
+}
+
+.aron-field-row > label,
+.aron-role-field > label {
+  color: var(--dim);
+  font-size: 12.5px;
+  min-width: 132px;
+}
+
+.aron-field-row > input[type="text"],
+.aron-field-row > input[type="number"],
+.aron-field-row > select,
+.aron-field-row > textarea {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.aron-field-description {
+  margin-left: 144px;
+}
+
+.aron-group-fields > .aron-field + .aron-field {
+  border-top: 1px solid var(--hairline);
+  padding-top: 10px;
+}
+
+.aron-readonly {
+  color: var(--dim);
+  font: 400 12px var(--mono);
+}
+
+.aron-role-fields {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.aron-role-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.aron-role-field > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.aron-provider {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--hairline);
+  padding-top: 10px;
+}
+
+.aron-secret-inputs > input {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.aron-secret-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.aron-secret-entry > span {
+  color: var(--dim);
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.aron-camera-controls {
+  display: flex;
+  flex: 1 1 250px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.aron-camera-controls > select {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+.aron-camera-controls > button {
+  flex: 0 0 auto;
+}
+
 .diff {
   font: 400 11.5px/1.5 var(--mono);
   background: #08090b;

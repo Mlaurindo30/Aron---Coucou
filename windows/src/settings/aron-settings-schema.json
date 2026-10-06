@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ARON preferences",
+  "type": "object",
+  "required": [],
+  "additionalProperties": false,
+  "properties": {
+    "voice": {
+      "title": "Voice",
+      "description": "Gemini Live voice used for spoken replies.",
+      "type": "string",
+      "enum": [
+        "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
+        "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+        "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+        "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
+        "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+      ],
+      "default": "Puck",
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "engine": {
+      "title": "Voice engine",
+      "description": "Speech provider used by ARON.",
+      "type": "string",
+      "enum": ["gemini-live"],
+      "default": "gemini-live",
+      "x-uiGroup": "Providers",
+      "x-editable": true
+    },
+    "theme": {
+      "title": "Theme",
+      "description": "ARON's accent color.",
+      "type": "string",
+      "enum": ["azul", "ciano", "verde", "violeta", "ambar", "vermelho"],
+      "default": "azul",
+      "x-uiGroup": "Appearance",
+      "x-editable": true
+    },
+    "orb_style": {
+      "title": "Orb style",
+      "description": "Visual style of ARON's orb.",
+      "type": "string",
+      "enum": ["hud", "fluxo", "hibrido"],
+      "default": "hibrido",
+      "x-uiGroup": "Appearance",
+      "x-editable": true
+    },
+    "volume": {
+      "title": "Volume",
+      "description": "Speech volume from 0 to 100.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 70,
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "auto_pause": {
+      "title": "Auto-pause",
+      "description": "Pause ARON when the user is away.",
+      "type": "boolean",
+      "default": true,
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "auto_pause_seconds": {
+      "title": "Pause after",
+      "description": "Seconds away before ARON pauses.",
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 600,
+      "default": 20,
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "wake_enabled": {
+      "title": "Wake word",
+      "description": "Allow wake-word activation.",
+      "type": "boolean",
+      "default": false,
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "wake_name": {
+      "title": "Wake name",
+      "description": "Name ARON listens for.",
+      "type": "string",
+      "maxLength": 40,
+      "default": "",
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "wake_aliases": {
+      "title": "Name aliases",
+      "description": "One alternate wake name per line.",
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "wake_phrases": {
+      "title": "Wake phrases",
+      "description": "One complete wake phrase per line.",
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "wake_max_words": {
+      "title": "Maximum wake words",
+      "description": "Maximum words considered in a wake phrase.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 20,
+      "default": 6,
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "wake_fuzzy": {
+      "title": "Wake match tolerance",
+      "description": "Wake-word matching tolerance from 0 to 1.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0.75,
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "decision_engine": {
+      "title": "Wake decision engine",
+      "description": "Engine that confirms wake-word detections.",
+      "type": "string",
+      "enum": ["laya", "jev"],
+      "default": "laya",
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "wake_threshold_laya_multilingual": {
+      "title": "Laya multilingual calibration",
+      "description": "Read-only confidence threshold set by wake calibration.",
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "default": null,
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": false
+    },
+    "wake_threshold_jev": {
+      "title": "Jev calibration",
+      "description": "Read-only confidence threshold set by wake calibration.",
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "default": null,
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": false
+    },
+    "local_engine": {
+      "title": "Local wake fallback",
+      "description": "Local engine used when the primary wake decision is unavailable.",
+      "type": "string",
+      "enum": ["laya", "nimble"],
+      "default": "laya",
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "stt_model": {
+      "title": "Speech model",
+      "description": "Local speech-to-text model.",
+      "type": "string",
+      "enum": ["tiny", "base", "small"],
+      "default": "tiny",
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "stt_device": {
+      "title": "Speech device",
+      "description": "Device used for local speech-to-text.",
+      "type": "string",
+      "enum": ["auto", "cpu", "gpu"],
+      "default": "auto",
+      "x-uiGroup": "Voice/Wake",
+      "x-editable": true
+    },
+    "camera_device": {
+      "title": "Camera",
+      "description": "Camera device ID. Use Detect cameras to list available devices.",
+      "type": "string",
+      "maxLength": 256,
+      "default": "",
+      "x-control": "camera-device",
+      "x-uiGroup": "Vision",
+      "x-editable": true
+    },
+    "camera_label": {
+      "title": "Camera label",
+      "description": "Saved camera name used when a device ID changes.",
+      "type": "string",
+      "maxLength": 160,
+      "default": "",
+      "x-uiGroup": "Vision",
+      "x-editable": true
+    },
+    "history_enabled": {
+      "title": "History",
+      "description": "Store ARON's local text history.",
+      "type": "boolean",
+      "default": true,
+      "x-uiGroup": "Privacy/History",
+      "x-editable": true
+    },
+    "history_retention_days": {
+      "title": "Retention days",
+      "description": "Days to keep history; 0 keeps it indefinitely.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3650,
+      "default": 90,
+      "x-uiGroup": "Privacy/History",
+      "x-editable": true
+    },
+    "history_store_replies": {
+      "title": "Store replies",
+      "description": "Include ARON replies in local history.",
+      "type": "boolean",
+      "default": true,
+      "x-uiGroup": "Privacy/History",
+      "x-editable": true
+    },
+    "hermes_profiles": {
+      "title": "Hermes profiles",
+      "description": "Optional Hermes profile IDs by generic role.",
+      "type": "object",
+      "properties": {
+        "hermes_profile": {
+          "title": "Hermes profile",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "hermes_squad": {
+          "title": "Hermes squad",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "additionalProperties": false,
+      "default": {},
+      "x-control": "hermes-profiles",
+      "x-uiGroup": "Hermes Routing",
+      "x-editable": true
+    }
+  }
+}

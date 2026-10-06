@@ -6,6 +6,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Settings } from "./state";
+import type {
+  AronProvider,
+  AronSecretStatus,
+  AronSettingsPatch,
+  AronSettingsSnapshot,
+} from "./aron-settings";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -91,6 +97,17 @@ export const Bridge = {
   secretPresent: (key: string) => call<boolean>("secret_present", { key }),
   secretSet: (key: string, value: string) => callOrThrow<void>("secret_set", { key, value }),
   secretClear: (key: string) => callOrThrow<void>("secret_clear", { key }),
+
+  // ── ARON settings and credentials (separate from Coucou's Settings store) ──
+  loadAronSettings: () => callOrThrow<AronSettingsSnapshot>("load_aron_settings"),
+  updateAronSettings: ({ prefs, revision }: AronSettingsPatch) =>
+    callOrThrow<AronSettingsSnapshot>("update_aron_settings", { patch: prefs, revision }),
+  aronSecretAdd: (provider: AronProvider, value: string, label: string) =>
+    callOrThrow<AronSecretStatus>("aron_secret_add", { provider, value, label }),
+  aronSecretRemove: (provider: AronProvider, id: string) =>
+    callOrThrow<AronSecretStatus>("aron_secret_remove", { provider, id }),
+  aronSecretStatus: (provider: AronProvider) =>
+    callOrThrow<AronSecretStatus>("aron_secret_status", { provider }),
 
   // ── Integrations ──────────────────────────────────────────────────────────
   refreshIntegration: (id: string) => call<void>("refresh_integration", { id }),
